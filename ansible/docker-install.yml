@@ -4,6 +4,18 @@
   become: yes
 
   tasks:
+    - name: Install growpart package
+      dnf:
+        name: cloud-utils-growpart
+        state: present
+
+    - name: Expand partition
+      shell: "growpart /dev/nvme0n1 1"
+      ignore_errors: yes
+
+    - name: Expand XFS filesystem
+      shell: "xfs_growfs /"
+      ignore_errors: yes
 
     - name: Update packages
       dnf:
@@ -27,7 +39,7 @@
         groups: docker
         append: yes
 
-    - name: Restart Docker
+    - name: Restart Docker to apply group membership changes
       service:
         name: docker
         state: restarted

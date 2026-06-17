@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime
 
 st.set_page_config(
-    page_title="DevOps Streamlit Dashboard",
+    page_title="DevOps Streamlit Dashboard v2",
     page_icon="🚀",
     layout="wide"
 )

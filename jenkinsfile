@@ -1,0 +1,162 @@
+pipeline {
+    agent any
+
+    environment {
+        PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+        TERRAFORM_CMD = "/opt/homebrew/bin/terraform"
+        ANSIBLE_CMD   = "/opt/homebrew/bin/ansible-playbook"
+        DOCKER_CMD    = "/usr/local/bin/docker"
+
+        IMAGE_NAME = "vikas7974344880/devops-streamlit-dashboard"
+        IMAGE_TAG  = "latest"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/vikasmishra1711/devops-streamlit-dashboard.git'
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir('terraform') {
+                    sh """
+                    ${TERRAFORM_CMD} init
+                    """
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'aws-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
+                    dir('terraform') {
+                        sh """
+                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+
+                        ${TERRAFORM_CMD} apply -auto-approve
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Get EC2 IP') {
+            steps {
+                script {
+                    env.SERVER_IP = sh(
+                        script: """
+                        cd terraform && ${TERRAFORM_CMD} output -raw public_ip
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    echo "EC2 IP: ${env.SERVER_IP}"
+                }
+            }
+        }
+
+        stage('Update Inventory') {
+            steps {
+                // Using double quotes here so Jenkins can interpolate ${env.SERVER_IP}
+                sh """
+                cat > ansible/inventory <<EOF
+[webserver]
+${env.SERVER_IP} ansible_user=ec2-user
+EOF
+                """
+            }
+        }
+
+        stage('Install Docker') {
+            steps {
+                sshagent(credentials: ['ec2-key']) {
+                    dir('ansible') {
+                        // Changed to double quotes so we can use ${ANSIBLE_CMD} dynamically
+                        sh """
+                        export ANSIBLE_HOST_KEY_CHECKING=False
+
+                        ${ANSIBLE_CMD} -i inventory docker-install.yml
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Docker') {
+            steps {
+                sh '''
+                echo $PATH
+
+            which docker
+            which docker-credential-osxkeychain
+
+            docker version
+            '''
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh '''
+                docker buildx create --use --name mybuilder || true
+
+                docker buildx build \
+                --platform linux/amd64 \
+                -t vikas7974344880/devops-streamlit-dashboard:latest \
+                --load .
+                '''
+            }
+        }
+
+        stage('DockerHub Login & Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    // Escaped the $ signs for pure shell variables, but left DOCKER_CMD for Jenkins interpolation
+                    sh """
+                    echo \$DOCKER_PASS | ${DOCKER_CMD} login -u \$DOCKER_USER --password-stdin
+                    ${DOCKER_CMD} push ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                sshagent(credentials: ['ec2-key']) {
+                    dir('ansible') {
+                        sh """
+                        export ANSIBLE_HOST_KEY_CHECKING=False
+
+                        ${ANSIBLE_CMD} -i inventory deploy.yml
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment Successful"
+            echo "Application URL: http://${env.SERVER_IP}:8501"
+        }
+
+        failure {
+            echo "Pipeline Failed"
+        }
+    }
+}
