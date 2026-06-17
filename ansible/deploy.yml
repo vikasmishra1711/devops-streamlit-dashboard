@@ -1,0 +1,26 @@
+---
+- name: Deploy Streamlit Application
+  hosts: webserver
+  become: yes
+
+  vars:
+    image_name: "vikas7974344880/devops-streamlit-dashboard:latest"
+    container_name: "devops-streamlit-dashboard"
+
+  tasks:
+
+    - name: Pull latest Docker image
+      command: docker pull {{ image_name }}
+
+    - name: Stop existing container
+      shell: docker stop {{ container_name }} || true
+
+    - name: Remove existing container
+      shell: docker rm {{ container_name }} || true
+
+    - name: Run Streamlit container
+      command: >
+        docker run -d
+        --name {{ container_name }}
+        -p 8501:8501
+        {{ image_name }}
