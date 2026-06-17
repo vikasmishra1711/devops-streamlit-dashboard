@@ -11,9 +11,5 @@ variable "instance_type" {
 variable "key_name" {
   description = "AWS Key Pair Name"
   type        = string
-}
-
-variable "ami_id" {
-  description = "Amazon Linux 2023 AMI"
-  type        = string
+  default     = "devops-streamlit-key"
 }
