@@ -9,6 +9,9 @@
 
   tasks:
 
+    - name: Remove unused Docker images
+      shell: docker system prune -a -f
+
     - name: Pull latest Docker image
       command: docker pull {{ image_name }}
 
